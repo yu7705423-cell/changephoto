@@ -5,8 +5,11 @@
   var $ = U.$, $$ = U.$$, el = U.el;
 
   var state = {
-    source: '',
-    sourceName: 'code.html',
+    /* 代码文件可以有好几个（比如一次传一堆 css），各自独立提取、独立导出 */
+    files: [{ name: '粘贴的代码.txt', text: '' }],
+    curFile: 0,
+    outs: [],
+    curOut: 0,
     items: [],
     cmp: null,          // { olds, news, rows }
     picked: null,       // { type:'pool'|'row', i }
@@ -43,23 +46,79 @@
   }
 
   /* ============ 1. 输入 ============ */
-  $('#file').addEventListener('change', function (e) {
-    var files = Array.prototype.slice.call(e.target.files || []);
-    if (!files.length) return;
-    Promise.all(files.map(U.readText)).then(function (texts) {
-      $('#src').value = texts.join('\n\n/* ---- ' + files.map(function (f) { return f.name; }).join(' | ') + ' ---- */\n\n');
-      state.sourceName = files[0].name;
-      updateSrcInfo();
-      U.toast('已读入 ' + files.length + ' 个文件');
+  var CODE_EXT = /\.(html?|css|s[ac]ss|less|txt|markdown|md|json|xml|vue|[jt]sx?|php|astro|svelte)$/i;
+
+  function isCodeFile(f) {
+    return CODE_EXT.test(f.name) || (/^text\//.test(f.type) && !U.IMG_EXT.test(f.name));
+  }
+
+  /* 一次读进来一堆代码文件，各自保持独立，不合并成一坨 */
+  function addCodeFiles(fileList) {
+    var arr = Array.prototype.slice.call(fileList || []).filter(isCodeFile);
+    if (!arr.length) { U.toast('没挑出代码文件来 owo'); return; }
+    arr.sort(function (a, b) {
+      return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+    });
+    Promise.all(arr.map(U.readText)).then(function (texts) {
+      // 空的「粘贴的代码」占位就别留着了
+      if (state.files.length === 1 && !state.files[0].text.trim()) state.files = [];
+      var from = state.files.length;
+      arr.forEach(function (f, i) { state.files.push({ name: f.name, text: texts[i] }); });
+      state.curFile = from;
+      renderFileTabs();
+      showFile(from);
+      U.toast('读入 ' + arr.length + ' 个文件，一共 ' + state.files.length + ' 个');
+      scheduleSave();
     }).catch(function (err) { U.toast(err.message); });
+  }
+
+  $('#file').addEventListener('change', function (e) {
+    addCodeFiles(e.target.files);
+    e.target.value = '';
   });
 
-  $('#btn-clear-src').addEventListener('click', function () {
-    $('#src').value = '';
+  function renderFileTabs() {
+    var box = $('#file-tabs');
+    box.textContent = '';
+    box.hidden = state.files.length < 2;
+    if (box.hidden) return;
+    state.files.forEach(function (f, i) {
+      var tab = el('button', { class: 'ftab' + (i === state.curFile ? ' on' : '') }, [
+        el('span', { class: 'fn', text: (i + 1) + '.' }),
+        el('span', { class: 'fname', text: f.name, title: f.name }),
+        el('span', { class: 'fx', text: '×', title: '移掉这个文件',
+          onclick: function (ev) { ev.stopPropagation(); removeFile(i); } })
+      ]);
+      tab.addEventListener('click', function () { showFile(i); });
+      box.appendChild(tab);
+    });
+  }
+
+  function showFile(i) {
+    if (i < 0 || i >= state.files.length) return;
+    state.curFile = i;
+    $('#src').value = state.files[i].text;
+    renderFileTabs();
     updateSrcInfo();
+  }
+
+  function removeFile(i) {
+    state.files.splice(i, 1);
+    if (!state.files.length) state.files = [{ name: '粘贴的代码.txt', text: '' }];
+    showFile(Math.min(state.curFile, state.files.length - 1));
+    scheduleSave();
+  }
+
+  $('#btn-clear-src').addEventListener('click', function () {
+    state.files = [{ name: '粘贴的代码.txt', text: '' }];
+    state.curFile = 0;
+    showFile(0);
+    scheduleSave();
   });
 
   $('#btn-sample').addEventListener('click', function () {
+    state.files = [{ name: 'sample.html', text: '' }];
+    state.curFile = 0;
     $('#src').value = [
       '<div class="gallery">',
       '  <img src="https://picsum.photos/id/1015/600/400" alt="河">',
@@ -72,14 +131,24 @@
       '  .gone { background: url(https://example.invalid/已经失效的图.png); }',
       '</style>'
     ].join('\n');
-    state.sourceName = 'sample.html';
+    state.files[0].text = $('#src').value;
+    renderFileTabs();
     updateSrcInfo();
   });
 
-  $('#src').addEventListener('input', function () { updateSrcInfo(); scheduleSave(); });
+  $('#src').addEventListener('input', function () {
+    state.files[state.curFile].text = $('#src').value;
+    updateSrcInfo();
+    scheduleSave();
+  });
   function updateSrcInfo() {
     var n = $('#src').value.length;
-    $('#src-info').textContent = n ? ('当前 ' + n.toLocaleString() + ' 个字符') : '';
+    var many = state.files.length > 1;
+    $('#src-info').textContent = n
+      ? (many ? '这个文件 ' : '当前 ') + n.toLocaleString() + ' 个字符' +
+        (many ? '，一共 ' + state.files.length + ' 个文件、' +
+                state.files.reduce(function (a, f) { return a + f.text.length; }, 0).toLocaleString() + ' 个字符' : '')
+      : '';
   }
 
   /* 中转设置 */
@@ -117,12 +186,36 @@
   });
 
   /* ============ 提取 ============ */
+  /* 每个文件单独提取，再按链接合并去重；每处出现都记住属于哪个文件 */
+  function extractAll(baseUrl) {
+    var byKey = {}, items = [], total = 0, unresolved = 0;
+    state.files.forEach(function (f, fi) {
+      if (!f.text.trim()) return;
+      var r = Extractor.extract(f.text, { baseUrl: baseUrl });
+      total += r.total;
+      unresolved += r.unresolved;
+      r.items.forEach(function (it) {
+        it.occurrences.forEach(function (o) { o.f = fi; });
+        var key = it.url || ('!rel!' + it.raw);
+        if (byKey[key]) {
+          byKey[key].occurrences = byKey[key].occurrences.concat(it.occurrences);
+        } else {
+          byKey[key] = it;
+          items.push(it);
+        }
+      });
+    });
+    items.forEach(function (it, i) { it.id = 'i' + i; it.index = i + 1; });
+    return { items: items, total: total, unresolved: unresolved };
+  }
+
   $('#btn-extract').addEventListener('click', function () {
-    var src = $('#src').value;
-    if (!src.trim()) { U.toast('先把代码贴进来 owo'); return; }
+    state.files[state.curFile].text = $('#src').value;
+    if (!state.files.some(function (f) { return f.text.trim(); })) {
+      U.toast('先把代码贴进来 owo'); return;
+    }
     applyRelay();
-    state.source = src;
-    var r = Extractor.extract(src, { baseUrl: $('#base-url').value.trim() });
+    var r = extractAll($('#base-url').value.trim());
     if (!r.items.length) {
       U.toast('没找到图片链接，确认一下代码里有没有图？');
       return;
@@ -142,7 +235,10 @@
 
     var extra = [];
     if (r.unresolved) extra.push(r.unresolved + ' 处是相对路径，填上「基准地址」才能还原');
-    U.toast('找到 ' + r.items.length + ' 张图（共出现 ' + r.total + ' 处）' + (extra.length ? '；' + extra.join('；') : ''));
+    var nFiles = state.files.filter(function (f) { return f.text.trim(); }).length;
+    U.toast('找到 ' + r.items.length + ' 张图（' +
+            (nFiles > 1 ? nFiles + ' 个文件里共出现 ' : '共出现 ') + r.total + ' 处）' +
+            (extra.length ? '；' + extra.join('；') : ''));
     $('#restore-bar').hidden = true;
     saveNow();
     probeAll();
@@ -239,7 +335,13 @@
     dragDepth = 0;
     document.body.classList.remove('dragging');
     $('#drop').classList.remove('over');
-    addLocalFiles(e.dataTransfer.files);
+    // 拖进来的可能是图片，也可能是 css / html —— 分开处理
+    var all = Array.prototype.slice.call(e.dataTransfer.files);
+    var imgs = all.filter(function (f) { return /^image\//.test(f.type) || U.IMG_EXT.test(f.name); });
+    var code = all.filter(function (f) { return imgs.indexOf(f) < 0 && isCodeFile(f); });
+    if (imgs.length) addLocalFiles(imgs);
+    if (code.length) addCodeFiles(code);
+    if (!imgs.length && !code.length) U.toast('这些文件我认不出来 owo');
   });
 
   /* 直接粘贴 —— 截图完 Ctrl+V 就能传 */
@@ -525,7 +627,7 @@
       })).then(function (entries) {
         entries.push({ name: '清单.csv', data: buildManifest(r.files, r.bad) });
         entries.push({ name: '说明.txt', data: READ_ME });
-        U.saveBlob(Zip.build(entries), U.stem(state.sourceName) + '-图片.zip');
+        U.saveBlob(Zip.build(entries), U.stem(state.files[0].name || 'code') + '-图片.zip');
         doneToast(r, '打包好了');
         refreshCacheInfo();
       });
@@ -1132,18 +1234,23 @@
     }
     if (!mapping.length) { U.toast('还没有配好任何一对，也还没上传过'); return; }
 
-    var hasCode = !!(state.source && state.source.trim());
-    var r = hasCode ? Extractor.replaceAll(state.source, state.items) : { text: '', count: 0 };
+    var totalCount = 0;
+    state.outs = state.files.map(function (f, i) {
+      var r = Extractor.replaceAll(f.text, state.items, i);
+      totalCount += r.count;
+      return { name: f.name, text: r.text, count: r.count };
+    }).filter(function (o) { return o.text.trim(); });
+    state.curOut = 0;
     state.mapping = mapping;
-    state.outCode = r.text;
 
     $('#export-empty').hidden = true;
-    $('#export-main').hidden = !hasCode;
+    $('#export-main').hidden = !state.outs.length;
     $('#table-main').hidden = false;
     $('#links-main').hidden = false;
     renderLinks();
-    $('#out-code').value = r.text;
-    $('#replace-info').textContent = '替换了 ' + r.count + ' 处，涉及 ' + mapping.length + ' 张图。' +
+    renderOutTabs();
+    $('#replace-info').textContent = '替换了 ' + totalCount + ' 处，涉及 ' + mapping.length + ' 张图' +
+      (state.outs.length > 1 ? '、' + state.outs.length + ' 个文件' : '') + '。' +
       (state.items.length - mapping.length > 0
         ? '还有 ' + (state.items.length - mapping.length) + ' 张没配新链接，代码里保持原样。' : '');
 
@@ -1167,6 +1274,12 @@
     switchTab('panel-export');
   }
 
+  function mappingCsv() {
+    return '﻿序号,可信度,依据,旧链接,新链接\n' + (state.mapping || []).map(function (m) {
+      return [m.no, m.conf, m.why, m.old, m.neu].map(csvCell).join(',');
+    }).join('\n');
+  }
+
   function linkText() {
     var fmt = (document.querySelector('input[name=linkfmt]:checked') || {}).value || 'url';
     return (state.mapping || []).map(function (m) {
@@ -1186,10 +1299,41 @@
     U.saveBlob(new Blob([$('#links-out').value], { type: 'text/plain;charset=utf-8' }), '新链接.txt');
   });
 
+  function renderOutTabs() {
+    var box = $('#out-tabs');
+    box.textContent = '';
+    box.hidden = state.outs.length < 2;
+    $('#btn-dl-all').hidden = state.outs.length < 2;
+    if (state.outs.length > 1) {
+      state.outs.forEach(function (o, i) {
+        var tab = el('button', { class: 'ftab' + (i === state.curOut ? ' on' : '') }, [
+          el('span', { class: 'fname', text: o.name, title: o.name }),
+          el('span', { class: 'fn', text: o.count ? '改了 ' + o.count + ' 处' : '没改动' })
+        ]);
+        tab.addEventListener('click', function () { state.curOut = i; renderOutTabs(); });
+        box.appendChild(tab);
+      });
+    }
+    var cur = state.outs[state.curOut];
+    $('#out-code').value = cur ? cur.text : '';
+  }
+
+  function outName(name) {
+    return name.replace(/(\.[^.]+)?$/, function (m) { return '-已替换' + (m || '.txt'); });
+  }
+
   $('#btn-copy-code').addEventListener('click', function () { U.copyText($('#out-code').value); });
   $('#btn-dl-code').addEventListener('click', function () {
-    var name = state.sourceName.replace(/(\.[^.]+)?$/, function (m) { return '-已替换' + (m || '.txt'); });
-    U.saveBlob(new Blob([$('#out-code').value], { type: 'text/plain;charset=utf-8' }), name);
+    var cur = state.outs[state.curOut];
+    if (!cur) return;
+    U.saveBlob(new Blob([cur.text], { type: 'text/plain;charset=utf-8' }), outName(cur.name));
+  });
+  $('#btn-dl-all').addEventListener('click', function () {
+    if (!state.outs.length) return;
+    var entries = state.outs.map(function (o) { return { name: outName(o.name), data: o.text }; });
+    entries.push({ name: '链接对照表.csv', data: mappingCsv() });
+    U.saveBlob(Zip.build(entries), '已替换的代码.zip');
+    U.toast('打包好了：' + state.outs.length + ' 个文件');
   });
 
   $('#table-main').addEventListener('click', function (e) {
@@ -1197,12 +1341,7 @@
     if (!b || !state.mapping) return;
     var fmt = b.dataset.fmt, text, mime = 'text/plain;charset=utf-8', ext = 'txt';
     if (fmt === 'csv') {
-      text = '﻿序号,可信度,依据,旧链接,新链接\n' + state.mapping.map(function (m) {
-        return [m.no, m.conf, m.why, m.old, m.neu].map(function (s) {
-          s = String(s);
-          return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-        }).join(',');
-      }).join('\n');
+      text = mappingCsv();
       mime = 'text/csv;charset=utf-8'; ext = 'csv';
     } else if (fmt === 'md') {
       text = '| 序号 | 可信度 | 依据 | 旧链接 | 新链接 |\n|---|---|---|---|---|\n' +
@@ -1238,16 +1377,16 @@
      手机浏览器会把后台标签页直接回收，回来等于重新打开。
      所以每有变动就把进度写进本机，下次打开自动接上。 */
 
-  var SAVE_KEY = 'session', SAVE_V = 1;
+  var SAVE_KEY = 'session', SAVE_V = 2;
   var saveTimer = null, restoring = false, wiping = false;
 
   function snapshot() {
+    if (state.files[state.curFile]) state.files[state.curFile].text = $('#src').value;
     return {
       v: SAVE_V,
       time: Date.now(),
-      source: state.source,
-      srcText: $('#src').value,
-      sourceName: state.sourceName,
+      files: state.files,
+      curFile: state.curFile,
       baseUrl: $('#base-url').value,
       newUrlsText: $('#new-urls').value,
       panel: (document.querySelector('.panel.active') || {}).id || 'panel-input',
@@ -1273,7 +1412,8 @@
   function saveNow() {
     // wiping：用户正在清空，别让 pagehide 上的这次保存把刚删掉的又写回去
     if (restoring || wiping) return Promise.resolve();
-    if (!state.items.length && !$('#src').value.trim()) return Store.del(SAVE_KEY);
+    var anyText = state.files.some(function (f) { return f.text.trim(); });
+    if (!state.items.length && !anyText && !$('#src').value.trim()) return Store.del(SAVE_KEY);
     return Store.set(SAVE_KEY, snapshot());
   }
   function scheduleSave() {
@@ -1286,14 +1426,17 @@
       if (!d || d.v !== SAVE_V) return;
       restoring = true;
       try {
-        if (d.srcText) { $('#src').value = d.srcText; }
+        if (d.files && d.files.length) {
+          state.files = d.files;
+          state.curFile = Math.min(d.curFile || 0, d.files.length - 1);
+          renderFileTabs();
+          $('#src').value = state.files[state.curFile].text;
+        }
         if (d.baseUrl) $('#base-url').value = d.baseUrl;
         if (d.newUrlsText) $('#new-urls').value = d.newUrlsText;
         updateSrcInfo();
 
         if (d.items && d.items.length) {
-          state.source = d.source || '';
-          state.sourceName = d.sourceName || 'code.html';
           state.items = d.items.map(function (i) { i.blob = null; return i; });
           // 本机文件的 blob: 地址刷新就失效了，从缓存里把文件捞回来重新生成
           var locals = state.items.filter(function (i) { return i.isLocal; });

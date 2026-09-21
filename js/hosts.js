@@ -41,6 +41,16 @@
     }, obj);
   }
 
+  /* ImgBB / S.EE 这类图床一般只收位图。传 SVG 失败时把原因说清楚，
+     别让人以为是工具不支持 —— 工具是支持的，是对方不收 */
+  function svgHint(filename, e) {
+    if (/\.svgz?$/i.test(filename || '')) {
+      return new Error((e.message || e) +
+        '　← SVG 这类矢量图这家图床通常不收。要传 SVG 的话改用 GitHub + jsDelivr 或 Cloudflare R2');
+    }
+    return e;
+  }
+
   function fail(res, fallback) {
     var msg = (res.json && (res.json.error && (res.json.error.message || res.json.error))) ||
               (res.json && (res.json.message || res.json.msg)) ||
@@ -77,7 +87,8 @@
     /* ---------------- GitHub 仓库 + jsDelivr CDN ---------------- */
     github: {
       name: 'GitHub + jsDelivr',
-      note: '把图片提交到你的公开仓库，再用 jsDelivr 免费加速。仓库必须是 public，jsDelivr 才读得到。' +
+      note: '把图片提交到你的公开仓库，再用 jsDelivr 免费加速。什么格式都能传，SVG / AVIF 也行。' +
+            '仓库必须是 public，jsDelivr 才读得到。' +
             ' Token 在 GitHub → Settings → Developer settings → Personal access tokens 生成，勾 repo（细粒度 token 给 Contents 读写权限即可）。',
       fields: [
         { key: 'owner', label: 'GitHub 用户名', type: 'text', required: true, placeholder: '例如 octocat' },
@@ -146,7 +157,8 @@
     /* ---------------- ImgBB ---------------- */
     imgbb: {
       name: 'ImgBB',
-      note: 'API Key 在 imgbb.com → 登录后打开 api.imgbb.com 点 Get API key。单张最大 32MB。',
+      note: 'API Key 在 imgbb.com → 登录后打开 api.imgbb.com 点 Get API key。单张最大 32MB。' +
+            'PNG / JPG / GIF / WebP / BMP / HEIC 都能传，但一般不收 SVG。',
       fields: [
         { key: 'key', label: 'API Key', type: 'password', required: true, placeholder: 'imgbb 的 api key' },
         { key: 'expiration', label: '自动删除', type: 'select', value: '',
@@ -169,7 +181,7 @@
             if (res.ok && link) {
               return { url: link, deleteUrl: dig(res.json, 'data.delete_url') };
             }
-            throw fail(res, '上传失败');
+            throw svgHint(filename, fail(res, '上传失败'));
           });
         });
       }
@@ -179,7 +191,8 @@
     smms: {
       name: 'S.EE（原 SM.MS）',
       note: 'SM.MS 已整体迁到 s.ee，接口仍兼容原来的 v2 API。Token 在登录后的控制台 API Token 页面拿。' +
-            '单张最大 5MB、每分钟限 20 张，所以这里会自动放慢速度。浏览器报跨域错误就勾「通过 Worker 中转」。',
+            '单张最大 5MB、每分钟限 20 张，所以这里会自动放慢速度。浏览器报跨域错误就勾「通过 Worker 中转」。' +
+            '收位图，一般不收 SVG。',
       fields: [
         { key: 'token', label: 'API Token', type: 'password', required: true, placeholder: 's.ee 的 API Token' },
         { key: 'base', label: '接口域名', type: 'select', value: 'https://s.ee',
@@ -207,7 +220,7 @@
             if (j && j.code === 'image_repeated' && j.images) {
               return { url: j.images, note: '这张图之前传过，复用了原链接' };
             }
-            throw fail(res, (j && j.message) || '上传失败');
+            throw svgHint(filename, fail(res, (j && j.message) || '上传失败'));
           });
       }
     },

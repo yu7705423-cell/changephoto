@@ -46,10 +46,11 @@
 <section id="panel-input" class="panel active">
   <div class="card-box">
     <h2>粘贴代码，或选择文件</h2>
+    <div class="file-tabs" id="file-tabs" hidden></div>
     <textarea id="src" spellcheck="false" placeholder="把 HTML / CSS / Markdown / 纯文本粘进来，里面的图片链接会被自动找出来…"></textarea>
     <div class="row-flex">
-      <label class="btn file-btn">选择文件
-        <input type="file" id="file" accept=".html,.htm,.css,.txt,.md,.markdown,.svg,.json,.vue,.jsx,.tsx,text/*" multiple hidden>
+      <label class="btn file-btn">选择代码文件
+        <input type="file" id="file" accept=".html,.htm,.css,.scss,.less,.txt,.md,.markdown,.json,.xml,.vue,.jsx,.tsx,.js,.ts,text/*" multiple hidden>
       </label>
       <button class="btn ghost" id="btn-sample">放个示例看看</button>
       <button class="btn ghost" id="btn-clear-src">清空</button>
@@ -66,11 +67,14 @@
     <div class="drop" id="drop">
       <div class="row-flex" style="justify-content:center">
         <label class="btn file-btn">选择图片
-          <input type="file" id="pick-imgs" accept="image/*" multiple hidden></label>
+          <input type="file" id="pick-imgs"
+            accept="image/*,.svg,.svgz,.webp,.avif,.gif,.bmp,.ico,.tif,.tiff,.heic,.heif,.jfif"
+            multiple hidden></label>
         <label class="btn file-btn">选整个文件夹
           <input type="file" id="pick-dir" webkitdirectory directory multiple hidden></label>
       </div>
-      <p class="hint">把图片拖到这里也行，或者直接 Ctrl / ⌘ + V 粘贴</p>
+      <p class="hint">把图片拖到这里也行，或者直接 Ctrl / ⌘ + V 粘贴<br>
+        PNG / JPG / <b>SVG</b> / GIF / WebP / AVIF / BMP / ICO / TIFF / HEIC 都支持</p>
     </div>
     <p class="hint" id="local-info"></p>
   </div>
@@ -216,10 +220,12 @@
   <div class="card-box" id="export-main" hidden>
     <h2>替换后的代码</h2>
     <p class="hint" id="replace-info"></p>
+    <div class="file-tabs" id="out-tabs" hidden></div>
     <textarea id="out-code" spellcheck="false" readonly></textarea>
     <div class="row-flex">
-      <button class="btn primary" id="btn-copy-code">复制代码</button>
-      <button class="btn ghost" id="btn-dl-code">下载文件</button>
+      <button class="btn primary" id="btn-copy-code">复制这个文件</button>
+      <button class="btn ghost" id="btn-dl-code">下载这个文件</button>
+      <button class="btn ghost" id="btn-dl-all" hidden>打包下载全部文件</button>
     </div>
   </div>
   <div class="card-box" id="links-main" hidden>

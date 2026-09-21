@@ -386,3 +386,23 @@ th { background: var(--surface-2); white-space: nowrap; }
 .drop.over { border-color: var(--border-strong); border-style: solid; background: var(--surface-3); }
 body.dragging .drop { border-color: var(--border-strong); }
 #links-out { min-height: 150px; }
+
+/* 多个代码文件时的文件标签 */
+.file-tabs {
+  display: flex; gap: 6px; margin-bottom: 8px;
+  overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+}
+.file-tabs::-webkit-scrollbar { display: none; }
+.file-tabs[hidden] { display: none; }
+.ftab {
+  flex: 0 0 auto; font: inherit; font-size: 12.5px; cursor: pointer;
+  background: var(--surface-2); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px;
+  display: inline-flex; align-items: center; gap: 6px; max-width: 220px;
+}
+.ftab:hover { border-color: var(--border-strong); color: var(--text); }
+.ftab.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.ftab .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftab .fn { font-variant-numeric: tabular-nums; opacity: .7; font-size: 11px; }
+.ftab .fx { opacity: .6; font-size: 14px; line-height: 1; }
+.ftab .fx:hover { opacity: 1; }

@@ -186,12 +186,14 @@
     return { items: items, total: hits.length, unresolved: unresolved };
   }
 
-  /* 按记录的区间把旧链接换成新链接，从后往前替换保证下标不串位 */
-  function replaceAll(source, items) {
+  /* 按记录的区间把旧链接换成新链接，从后往前替换保证下标不串位。
+     多文件时每处出现都记了属于哪个文件（o.f），只替换这个文件里的。 */
+  function replaceAll(source, items, fileIdx) {
     var edits = [];
     items.forEach(function (it) {
       if (!it.newUrl || it.newUrl === it.url) return;
       it.occurrences.forEach(function (o) {
+        if (fileIdx !== undefined && (o.f || 0) !== fileIdx) return;
         edits.push({ start: o.start, end: o.end, text: it.newUrl });
       });
     });
