@@ -98,11 +98,22 @@
       <button class="btn ghost" id="btn-recheck">重新检测</button>
     </div>
     <div class="toolbar">
-      <button class="btn primary" id="btn-zip">打包下载 ZIP</button>
       <button class="btn primary" id="btn-upload-open">转存到图床</button>
       <span class="grow"></span>
       <label class="chk"><input type="checkbox" id="filter-dead"> 隐藏已失效</label>
     </div>
+    <div class="toolbar" id="save-bar">
+      <span class="stat">保存到本地：</span>
+      <button class="btn" id="btn-share" hidden>分享 / 存到手机</button>
+      <button class="btn" id="btn-dir" hidden>存到文件夹</button>
+      <button class="btn" id="btn-each">逐张保存</button>
+      <button class="btn" id="btn-zip">打包 ZIP</button>
+      <button class="btn tiny" id="btn-manifest">只要清单 CSV</button>
+    </div>
+    <details class="save-diff">
+      <summary>这几种有什么区别？</summary>
+      <div class="hint" id="save-hint"></div>
+    </details>
     <div class="progress" id="dl-progress" hidden><div class="bar"></div><span class="ptext"></span></div>
     <div id="dl-log" class="log"></div>
     <div id="grid" class="grid"></div>

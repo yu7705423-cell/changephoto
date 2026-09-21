@@ -357,3 +357,15 @@ th { background: var(--surface-2); white-space: nowrap; }
   position: absolute; top: 12px; right: 16px; font-size: 30px; line-height: 1;
   background: none; border: none; color: #fff; cursor: pointer;
 }
+
+/* 保存方式的说明：默认收起来，手机上别占掉半屏 */
+.save-diff { margin: -4px 0 14px; }
+.save-diff > summary {
+  cursor: pointer; list-style: none; font-size: 13px; color: var(--text-dim);
+  display: inline-block; border-bottom: 1px dashed var(--border);
+}
+.save-diff > summary::-webkit-details-marker { display: none; }
+.save-diff > summary::before { content: "▸ "; }
+.save-diff[open] > summary::before { content: "▾ "; }
+.save-diff .hint { margin-top: 8px; }
+#save-bar { row-gap: 8px; }

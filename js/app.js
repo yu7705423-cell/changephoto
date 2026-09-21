@@ -288,55 +288,214 @@
   }
 
   /* ============ 打包 ZIP ============ */
-  $('#btn-zip').addEventListener('click', function () {
-    var list = selected();
-    if (!list.length) { U.toast('没有可下载的图'); return; }
-    var btn = this;
-    btn.disabled = true;
+  /* ============ 保存到本地 ============
+     手机上解压 ZIP 挺麻烦的，所以给了几种不用解压的方式，
+     按设备能力自动推荐一个，ZIP 留着给电脑用。 */
+
+  var CAN_SHARE = !!(navigator.share && navigator.canShare);
+  var CAN_DIR = typeof window.showDirectoryPicker === 'function';
+  var IS_TOUCH = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
+  function initSaveBar() {
+    var lines = [];
+    if (CAN_SHARE) {
+      $('#btn-share').hidden = false;
+      lines.push('<b>分享 / 存到手机</b>：调系统分享面板，直接存进「文件」或相册，不用解压。' +
+                 '存到「文件」会保留 001、002 的编号；存到相册会被系统重命名，' +
+                 '不过之后配对靠顺序和图像指纹一样能对上。');
+    }
+    if (CAN_DIR) {
+      $('#btn-dir').hidden = false;
+      lines.push('<b>存到文件夹</b>：选一个文件夹，图片直接写进去，不用解压。');
+    }
+    lines.push('<b>逐张保存</b>：一张张下载，哪个浏览器都能用。手机上可能会先问「是否允许下载多个文件」，允许即可。');
+    lines.push('<b>打包 ZIP</b>：一个文件装完，电脑上最省事，手机上要自己解压。');
+    $('#save-hint').innerHTML = lines.join('<br>');
+    var best = (IS_TOUCH && CAN_SHARE) ? '#btn-share' : (CAN_DIR ? '#btn-dir' : '#btn-zip');
+    $(best).classList.add('primary');
+  }
+
+  function csvCell(v) {
+    var t = String(v == null ? '' : v);
+    return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  }
+
+  function buildManifest(files, bad) {
+    var csv = '﻿序号,文件名,原始链接,状态\n' + files.map(function (f) {
+      return [U.pad(f.it.index, 3), csvCell(f.name), csvCell(f.it.url),
+              f.it.status === 'ok' ? '正常' : '可疑'].join(',');
+    }).join('\n');
+    (bad || []).forEach(function (b) {
+      csv += '\n' + [U.pad(b.it.index, 3), '(没取到)', csvCell(b.it.url), csvCell(b.why)].join(',');
+    });
+    return csv;
+  }
+
+  var READ_ME =
+    '这些图按 001、002… 的顺序编号了。\r\n' +
+    '按同样的顺序传到新图床，拿回来的链接多半也是同一个顺序，\r\n' +
+    '回到工具的「对照」标签把新链接一行一个粘进去，就能自动配对。\r\n' +
+    '（工具还会用文件名、图片尺寸、图像指纹交叉验证，不会只靠顺序）\r\n';
+
+  /* 把选中的图都取回来 */
+  function collectBlobs(list) {
+    var files = [], bad = [];
     var box = $('#dl-progress');
     $('#dl-log').textContent = '';
-    var files = [], bad = [];
-
-    U.pool(list, 4, function (it) {
+    return U.pool(list, 4, function (it) {
       return ensureBlob(it).then(function (r) {
-        if (!r.ok) { bad.push({ it: it, why: r.error }); log('dl-log', '✕ ' + it.filename + '：' + r.error, 'e'); return; }
-        return r.blob.arrayBuffer().then(function (buf) {
-          files.push({ name: finalName(it, r.blob), data: new Uint8Array(buf), it: it });
-        });
+        if (!r.ok) {
+          bad.push({ it: it, why: r.error });
+          log('dl-log', '✕ ' + it.filename + '：' + r.error, 'e');
+          return;
+        }
+        files.push({ name: finalName(it, r.blob), blob: r.blob, it: it });
       });
     }, function (d, t) { progress(box, d, t, '取图'); })
       .then(function () {
-        if (!files.length) {
-          U.toast('一张都没取到 TT 多半是跨域被拦了，配个 Worker 中转试试');
+        hideProgress(box);
+        files.sort(function (a, b) { return a.it.index - b.it.index; });
+        return { files: files, bad: bad };
+      });
+  }
+
+  /* 四个保存按钮共用的外壳：查选中 → （可选的前置动作）→ 取图 → 各自保存 */
+  function saveWith(btn, fn, before) {
+    var list = selected();
+    if (!list.length) { U.toast('没有可保存的图'); return; }
+    btn.disabled = true;
+    Promise.resolve()
+      .then(function () { return before ? before() : true; })
+      .then(function (pre) {
+        if (pre === false) return;
+        return collectBlobs(list).then(function (r) {
+          if (!r.files.length) {
+            U.toast('一张都没取到 TT 多半是跨域被拦了，配个 Worker 中转试试');
+            return;
+          }
+          return fn(r);
+        });
+      })
+      .catch(function (e) {
+        if (e && e.name === 'AbortError') return;     // 用户自己取消的，不用吵他
+        U.toast('出错了：' + ((e && e.message) || e));
+      })
+      .then(function () { btn.disabled = false; hideProgress($('#dl-progress')); });
+  }
+
+  function doneToast(r, what) {
+    U.toast(what + '：' + r.files.length + ' 张' +
+            (r.bad.length ? '，' + r.bad.length + ' 张没取到（看上面的失败列表）' : ''));
+  }
+
+  /* ---- 打包 ZIP ---- */
+  $('#btn-zip').addEventListener('click', function () {
+    saveWith(this, function (r) {
+      return Promise.all(r.files.map(function (f) {
+        return f.blob.arrayBuffer().then(function (buf) {
+          return { name: f.name, data: new Uint8Array(buf) };
+        });
+      })).then(function (entries) {
+        entries.push({ name: '清单.csv', data: buildManifest(r.files, r.bad) });
+        entries.push({ name: '说明.txt', data: READ_ME });
+        U.saveBlob(Zip.build(entries), U.stem(state.sourceName) + '-图片.zip');
+        doneToast(r, '打包好了');
+      });
+    });
+  });
+
+  /* ---- 存到文件夹（电脑版 Chrome / Edge）---- */
+  $('#btn-dir').addEventListener('click', function () {
+    var dir = null;
+    saveWith(this, function (r) {
+      var box = $('#dl-progress'), i = 0;
+      function write(name, data) {
+        return dir.getFileHandle(name, { create: true })
+          .then(function (fh) { return fh.createWritable(); })
+          .then(function (w) {
+            return Promise.resolve(w.write(data)).then(function () { return w.close(); });
+          });
+      }
+      function next() {
+        if (i >= r.files.length) {
+          return write('清单.csv', new Blob([buildManifest(r.files, r.bad)], { type: 'text/csv' }))
+            .then(function () { return write('说明.txt', new Blob([READ_ME], { type: 'text/plain' })); })
+            .then(function () { doneToast(r, '已写进文件夹'); });
+        }
+        var f = r.files[i++];
+        progress(box, i, r.files.length, '写入');
+        return write(f.name, f.blob).then(next);
+      }
+      return next();
+    }, function () {
+      // 选文件夹必须紧跟着点击动作，所以放在取图之前
+      return window.showDirectoryPicker({ mode: 'readwrite', id: 'image-mover' })
+        .then(function (h) { dir = h; return true; });
+    });
+  });
+
+  /* ---- 逐张保存 ---- */
+  $('#btn-each').addEventListener('click', function () {
+    saveWith(this, function (r) {
+      var box = $('#dl-progress');
+      return new Promise(function (resolve) {
+        var i = 0;
+        (function step() {
+          if (i >= r.files.length) {
+            U.saveBlob(new Blob([buildManifest(r.files, r.bad)], { type: 'text/csv;charset=utf-8' }), '清单.csv');
+            doneToast(r, '保存完了');
+            return resolve();
+          }
+          var f = r.files[i++];
+          U.saveBlob(f.blob, f.name);
+          progress(box, i, r.files.length, '保存');
+          setTimeout(step, 400);      // 连着触发太快浏览器会当成滥用
+        })();
+      });
+    });
+  });
+
+  /* ---- 分享到系统（手机上最省事）---- */
+  $('#btn-share').addEventListener('click', function () {
+    saveWith(this, function (r) {
+      var fs = r.files.map(function (f) {
+        return new File([f.blob], f.name, { type: f.blob.type || 'image/png' });
+      });
+      if (!navigator.canShare({ files: fs })) {
+        // 多半是一次给太多了，二分找出这台手机最多肯收几张
+        var lo = 1, hi = fs.length, best = 0;
+        while (lo <= hi) {
+          var mid = (lo + hi) >> 1;
+          if (navigator.canShare({ files: fs.slice(0, mid) })) { best = mid; lo = mid + 1; }
+          else hi = mid - 1;
+        }
+        if (!best) {
+          U.toast('这个浏览器不接受分享图片文件，用「逐张保存」吧');
           return;
         }
-        files.sort(function (a, b) { return a.it.index - b.it.index; });
-        var csv = '﻿序号,文件名,原始链接,状态\n' + files.map(function (f) {
-          return [U.pad(f.it.index, 3), q(f.name), q(f.it.url), f.it.status === 'ok' ? '正常' : '可疑'].join(',');
-        }).join('\n');
-        if (bad.length) {
-          csv += '\n' + bad.map(function (b) {
-            return [U.pad(b.it.index, 3), '(没取到)', q(b.it.url), q(b.why)].join(',');
-          }).join('\n');
-        }
-        var zipFiles = files.map(function (f) { return { name: f.name, data: f.data }; });
-        zipFiles.push({ name: '清单.csv', data: csv });
-        zipFiles.push({
-          name: '说明.txt',
-          data: '这些图按 001、002… 的顺序编号了。\r\n' +
-                '按同样的顺序传到新图床，拿回来的链接多半也是同一个顺序，\r\n' +
-                '回到工具的「对照」标签把新链接一行一个粘进去，就能自动配对。\r\n' +
-                '（工具还会用文件名、图片尺寸、图像指纹交叉验证，不会只靠顺序）\r\n'
+        fs = fs.slice(0, best);
+        U.toast('一次分享不了这么多，这次先分享前 ' + best + ' 张，剩下的取消勾选后再点一次');
+      }
+      return navigator.share({ files: fs })
+        .then(function () { U.toast('分享完成：' + fs.length + ' 张'); })
+        .catch(function (e) {
+          if (e.name === 'AbortError') return;        // 用户自己取消
+          if (e.name === 'NotAllowedError') {
+            U.toast('图片是刚取回来的，手机要求分享必须紧跟着点击 —— 现在已经缓存好了，再点一次就行');
+            return;
+          }
+          throw e;
         });
-        U.saveBlob(Zip.build(zipFiles), U.stem(state.sourceName) + '-图片.zip');
-        U.toast('打包好了：' + files.length + ' 张' + (bad.length ? '，' + bad.length + ' 张没取到' : ''));
-      })
-      .then(function () { btn.disabled = false; hideProgress(box); });
+    });
+  });
 
-    function q(s) {
-      s = String(s == null ? '' : s);
-      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    }
+  /* ---- 只要清单，不要图 ---- */
+  $('#btn-manifest').addEventListener('click', function () {
+    var list = selected();
+    if (!list.length) { U.toast('还没有图'); return; }
+    var rows = list.map(function (it) { return { name: it.filename, it: it }; });
+    U.saveBlob(new Blob([buildManifest(rows, [])], { type: 'text/csv;charset=utf-8' }), '清单.csv');
+    U.toast('清单下好了');
   });
 
   /* ============ 3. 转存到图床 ============ */
@@ -931,6 +1090,7 @@
 
   /* ============ 启动 ============ */
   applyTheme(U.store.get('theme', ''));
+  initSaveBar();
   loadRelay();
   initHostSelect();
   updateSrcInfo();
