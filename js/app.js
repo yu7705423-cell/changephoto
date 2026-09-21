@@ -148,6 +148,114 @@
     probeAll();
   });
 
+  /* ============ 直接传本机图片 ============
+     不少人不是要搬家，就是手上一堆图想传到图床拿链接，给这条路留个入口。 */
+
+  /* 本机文件的 blob: 地址刷新就失效，所以另外记一个稳定的缓存键 */
+  function cacheKeyOf(it) { return it.isLocal ? it.localKey : it.url; }
+  /* 本机文件显示原始文件名，别把 blob: 那串给用户看 */
+  function srcLabel(it) { return it.isLocal ? it.raw : (it.url || it.raw); }
+
+  function addLocalFiles(files) {
+    var imgs = Array.prototype.slice.call(files || []).filter(function (f) {
+      return /^image\//.test(f.type) || U.IMG_EXT.test(f.name);
+    });
+    if (!imgs.length) { U.toast('没挑出图片文件来 owo'); return; }
+    // 按文件名排序，序号才跟你在文件管理器里看到的顺序一致
+    imgs.sort(function (a, b) {
+      return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+    });
+
+    var base = state.items.length;
+    var added = imgs.map(function (f, k) {
+      var id = 'L' + Date.now().toString(36) + '-' + k;
+      var idx = base + k + 1;
+      return {
+        id: id, isLocal: true, localKey: 'local:' + id,
+        url: URL.createObjectURL(f), raw: f.name, kind: '本机文件',
+        resolved: true, isData: false, occurrences: [],
+        index: idx,
+        filename: U.pad(idx, 3) + '-' + U.nameFromUrl(f.name, idx),
+        status: 'ok', w: 0, h: 0,
+        blob: f, size: f.size, hash: null, newUrl: '', sel: true
+      };
+    });
+
+    state.items = state.items.concat(added);
+    state.cmp = null;
+    $('#tab-count').textContent = state.items.length;
+    $('#images-empty').hidden = true;
+    $('#images-main').hidden = false;
+    $('#restore-bar').hidden = true;
+    renderGrid();
+    switchTab('panel-images');
+    $('#local-info').textContent = '加了 ' + added.length + ' 张，一共 ' + state.items.length + ' 张';
+    U.toast('加了 ' + added.length + ' 张图，去「转存到图床」就能传 owo');
+
+    // 存进缓存，刷新后还能找回来；顺便量一下尺寸
+    Promise.all(added.map(function (it) { return Store.putBlob(it.localKey, it.blob); }))
+      .then(function () {
+        return U.pool(added, 6, function (it) {
+          return Img.probe(it.url).then(function (r) {
+            it.w = r.w || 0; it.h = r.h || 0;
+            if (!r.ok) { it.status = 'dead'; it.deadReason = '这个文件读不出来'; }
+            refreshCell(it);
+          });
+        });
+      })
+      .then(function () { updateStat(); saveNow(); refreshCacheInfo(); });
+  }
+
+  $('#pick-imgs').addEventListener('change', function (e) {
+    addLocalFiles(e.target.files);
+    e.target.value = '';
+  });
+  $('#pick-dir').addEventListener('change', function (e) {
+    addLocalFiles(e.target.files);
+    e.target.value = '';
+  });
+
+  /* 拖进来 —— 整页都能接，不用非得对准那个框 */
+  var dragDepth = 0;
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') < 0) return;
+      e.preventDefault();
+      if (ev === 'dragenter') { dragDepth++; document.body.classList.add('dragging'); }
+      var zone = e.target.closest && e.target.closest('#drop');
+      if (zone) zone.classList.add('over');
+    });
+  });
+  document.addEventListener('dragleave', function () {
+    if (--dragDepth <= 0) {
+      dragDepth = 0;
+      document.body.classList.remove('dragging');
+      $('#drop').classList.remove('over');
+    }
+  });
+  document.addEventListener('drop', function (e) {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove('dragging');
+    $('#drop').classList.remove('over');
+    addLocalFiles(e.dataTransfer.files);
+  });
+
+  /* 直接粘贴 —— 截图完 Ctrl+V 就能传 */
+  document.addEventListener('paste', function (e) {
+    var t = e.target;
+    if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) {
+      // 在输入框里粘贴的，只有确实带了图片文件才拦下来
+      var hasFile = e.clipboardData && e.clipboardData.files && e.clipboardData.files.length;
+      if (!hasFile) return;
+    }
+    if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length) {
+      e.preventDefault();
+      addLocalFiles(e.clipboardData.files);
+    }
+  });
+
   /* ============ 2. 图片网格 ============ */
   function statusBadge(it) {
     if (!it.resolved) return { cls: 'warn', text: '相对路径' };
@@ -186,7 +294,8 @@
 
     var acts = el('div', { class: 'acts' }, [
       el('button', { class: 'btn tiny', text: '下载', onclick: function () { downloadOne(it); } }),
-      el('button', { class: 'btn tiny', text: '复制链接', onclick: function () { U.copyText(it.url || it.raw); } })
+      el('button', { class: 'btn tiny', text: '复制链接',
+                     onclick: function () { U.copyText(it.newUrl || srcLabel(it)); } })
     ]);
 
     return el('div', { class: 'cell', 'data-id': it.id }, [
@@ -195,7 +304,7 @@
       thumb,
       el('div', { class: 'info' }, [
         el('span', { class: 'badge ' + b.cls, text: b.text }),
-        el('span', { class: 'u', title: it.url || it.raw, text: U.shorten(it.url || it.raw, 70) }),
+        el('span', { class: 'u', title: srcLabel(it), text: U.shorten(it.newUrl || srcLabel(it), 70) }),
         acts
       ])
     ]);
@@ -266,17 +375,19 @@
   function ensureBlob(it) {
     if (it.blob) return Promise.resolve({ ok: true, blob: it.blob });
     // 先看本机缓存 —— 抓过一次就不用再抓，切走回来也还在
-    return Store.getBlob(it.url).then(function (cached) {
+    var key = cacheKeyOf(it);
+    return Store.getBlob(key).then(function (cached) {
       if (cached) {
         it.blob = cached;
         it.size = cached.size;
         return { ok: true, blob: cached, via: '缓存' };
       }
+      if (it.isLocal) return { ok: false, error: '这个本机文件的缓存没了，重新选一次吧' };
       return Img.fetchBlob(it.url).then(function (r) {
         if (r.ok) {
           it.blob = r.blob;
           it.size = r.blob.size;
-          Store.putBlob(it.url, r.blob);
+          Store.putBlob(key, r.blob);
         }
         return r;
       });
@@ -749,12 +860,12 @@
       if (!target.w && r.w) { target.w = r.w; target.h = r.h; }
       if (r.blob) {
         if (!target.blob) target.blob = r.blob;
-        Store.putBlob(target.url, r.blob);
+        Store.putBlob(target.localKey || target.url, r.blob);
       }
     }
     function hashOf(target) {
       if (target.blob) return Img.hashFromBlob(target.blob).then(function (r) { take(target, r); });
-      return Store.getBlob(target.url).then(function (cached) {
+      return Store.getBlob(target.localKey || target.url).then(function (cached) {
         if (cached) {
           target.blob = cached;
           return Img.hashFromBlob(cached).then(function (r) { take(target, r); });
@@ -831,7 +942,7 @@
     var leftCap = el('div', { class: 'cap' }, [
       el('span', { class: 'badge ' + (o.status === 'ok' ? 'ok' : 'dead'),
                    text: U.pad(o.index, 3) + ' · ' + (o.w ? o.w + '×' + o.h : (o.status === 'dead' ? '已失效' : '?')) }),
-      el('span', { class: 'capurl', title: o.url || o.raw, text: o.url || o.raw })
+      el('span', { class: 'capurl', title: srcLabel(o), text: srcLabel(o) })
     ]);
     var left = el('div', { class: 'side' }, [leftBox, leftCap]);
     if (o.status === 'dead' && !o.localPreview) left.appendChild(upBtn);
@@ -994,31 +1105,43 @@
   $('#btn-to-export').addEventListener('click', buildExport);
 
   function buildExport() {
-    if (!state.cmp) { U.toast('还没有对照结果'); return; }
-    state.items.forEach(function (i) { i.newUrl = ''; });
     var mapping = [];
-    state.cmp.rows.forEach(function (row, i) {
-      var o = state.cmp.olds[i];
-      var nu = newUrlOf(row);
-      if (!nu) return;
-      o.newUrl = nu;
-      mapping.push({
-        no: U.pad(o.index, 3),
-        old: o.url || o.raw,
-        neu: nu,
-        conf: Match.LABEL[row.manual ? 'manual' : (row.conf || 'low')] || '-',
-        why: row.manual ? '手动指定' : (row.why || []).join(' · ')
+    if (state.cmp) {
+      state.items.forEach(function (i) { i.newUrl = ''; });
+      state.cmp.rows.forEach(function (row, i) {
+        var o = state.cmp.olds[i];
+        var nu = newUrlOf(row);
+        if (!nu) return;
+        o.newUrl = nu;
+        mapping.push({
+          no: U.pad(o.index, 3),
+          old: srcLabel(o),
+          neu: nu,
+          conf: Match.LABEL[row.manual ? 'manual' : (row.conf || 'low')] || '-',
+          why: row.manual ? '手动指定' : (row.why || []).join(' · ')
+        });
       });
-    });
-    if (!mapping.length) { U.toast('还没有配好任何一对'); return; }
+    } else {
+      // 没走对照也能导出：直接传本机图片的时候，对应关系本来就是确定的
+      state.items.filter(function (i) { return i.newUrl; }).forEach(function (o) {
+        mapping.push({
+          no: U.pad(o.index, 3), old: srcLabel(o), neu: o.newUrl,
+          conf: Match.LABEL.high, why: '本工具直接上传'
+        });
+      });
+    }
+    if (!mapping.length) { U.toast('还没有配好任何一对，也还没上传过'); return; }
 
-    var r = Extractor.replaceAll(state.source, state.items);
+    var hasCode = !!(state.source && state.source.trim());
+    var r = hasCode ? Extractor.replaceAll(state.source, state.items) : { text: '', count: 0 };
     state.mapping = mapping;
     state.outCode = r.text;
 
     $('#export-empty').hidden = true;
-    $('#export-main').hidden = false;
+    $('#export-main').hidden = !hasCode;
     $('#table-main').hidden = false;
+    $('#links-main').hidden = false;
+    renderLinks();
     $('#out-code').value = r.text;
     $('#replace-info').textContent = '替换了 ' + r.count + ' 处，涉及 ' + mapping.length + ' 张图。' +
       (state.items.length - mapping.length > 0
@@ -1043,6 +1166,25 @@
     t.appendChild(body);
     switchTab('panel-export');
   }
+
+  function linkText() {
+    var fmt = (document.querySelector('input[name=linkfmt]:checked') || {}).value || 'url';
+    return (state.mapping || []).map(function (m) {
+      var alt = U.stem(U.nameFromUrl(m.old, m.no));
+      if (fmt === 'md') return '![' + alt + '](' + m.neu + ')';
+      if (fmt === 'html') return '<img src="' + m.neu + '" alt="' + U.escapeHtml(alt) + '">';
+      if (fmt === 'bb') return '[img]' + m.neu + '[/img]';
+      return m.neu;
+    }).join('\n');
+  }
+  function renderLinks() { $('#links-out').value = linkText(); }
+  $$('input[name=linkfmt]').forEach(function (r) {
+    r.addEventListener('change', renderLinks);
+  });
+  $('#btn-copy-links').addEventListener('click', function () { U.copyText($('#links-out').value); });
+  $('#btn-dl-links').addEventListener('click', function () {
+    U.saveBlob(new Blob([$('#links-out').value], { type: 'text/plain;charset=utf-8' }), '新链接.txt');
+  });
 
   $('#btn-copy-code').addEventListener('click', function () { U.copyText($('#out-code').value); });
   $('#btn-dl-code').addEventListener('click', function () {
@@ -1112,6 +1254,7 @@
       items: state.items.map(function (i) {
         return {
           id: i.id, url: i.url, raw: i.raw, kind: i.kind, resolved: i.resolved, isData: i.isData,
+          isLocal: i.isLocal, localKey: i.localKey,
           occurrences: i.occurrences, index: i.index, filename: i.filename,
           status: i.status, w: i.w, h: i.h, newUrl: i.newUrl, sel: i.sel,
           hash: i.hash, size: i.size, deadReason: i.deadReason
@@ -1152,6 +1295,16 @@
           state.source = d.source || '';
           state.sourceName = d.sourceName || 'code.html';
           state.items = d.items.map(function (i) { i.blob = null; return i; });
+          // 本机文件的 blob: 地址刷新就失效了，从缓存里把文件捞回来重新生成
+          var locals = state.items.filter(function (i) { return i.isLocal; });
+          if (locals.length) {
+            Promise.all(locals.map(function (i) {
+              return Store.getBlob(i.localKey).then(function (b) {
+                if (b) { i.blob = b; i.url = URL.createObjectURL(b); }
+                else { i.status = 'dead'; i.deadReason = '本机文件的缓存没了'; }
+              });
+            })).then(function () { renderGrid(); });
+          }
           $('#tab-count').textContent = state.items.length;
           $('#images-empty').hidden = true;
           $('#images-main').hidden = false;

@@ -20,7 +20,7 @@
   <div class="wrap">
     <div>
       <h1>图床搬家工具</h1>
-      <p class="sub">提取代码里的图片 → 打包下载 → 转存新图床 → 前后对照 → 导出新代码</p>
+      <p class="sub">从代码里提取图片，或者直接选一堆图 → 保存到本地 / 转存新图床 → 前后对照 → 导出新代码和链接</p>
     </div>
     <span class="grow"></span>
     <button id="theme-toggle" title="切换日间 / 夜间">跟随系统</button>
@@ -58,6 +58,21 @@
     </div>
     <p class="hint" id="src-info"></p>
     <p class="hint" id="cache-info"></p>
+  </div>
+
+  <div class="card-box">
+    <h2>或者，直接传图片 <span class="tag-opt">不用贴代码</span></h2>
+    <p class="hint">手上就是一堆图、想传到图床拿链接的话，走这里。选完直接去「转存到图床」。</p>
+    <div class="drop" id="drop">
+      <div class="row-flex" style="justify-content:center">
+        <label class="btn file-btn">选择图片
+          <input type="file" id="pick-imgs" accept="image/*" multiple hidden></label>
+        <label class="btn file-btn">选整个文件夹
+          <input type="file" id="pick-dir" webkitdirectory directory multiple hidden></label>
+      </div>
+      <p class="hint">把图片拖到这里也行，或者直接 Ctrl / ⌘ + V 粘贴</p>
+    </div>
+    <p class="hint" id="local-info"></p>
   </div>
 
   <div class="card-box">
@@ -104,7 +119,7 @@
 <!-- ========== 2. 图片 ========== -->
 <section id="panel-images" class="panel">
   <div class="card-box" id="images-empty">
-    <p class="empty">还没有提取到图片。先回到「输入」贴代码吧 owo</p>
+    <p class="empty">还没有图片。回到「输入」贴代码，或者直接选几张图上传 owo</p>
   </div>
 
   <div class="card-box" id="images-main" hidden>
@@ -196,7 +211,7 @@
 <!-- ========== 4. 导出 ========== -->
 <section id="panel-export" class="panel">
   <div class="card-box" id="export-empty">
-    <p class="empty">还没有可以导出的内容，先去「对照」把新链接配好 owo</p>
+    <p class="empty">还没有可以导出的内容。先去「对照」把新链接配好，或者直接传几张图上去 owo</p>
   </div>
   <div class="card-box" id="export-main" hidden>
     <h2>替换后的代码</h2>
@@ -207,6 +222,21 @@
       <button class="btn ghost" id="btn-dl-code">下载文件</button>
     </div>
   </div>
+  <div class="card-box" id="links-main" hidden>
+    <h2>新链接列表</h2>
+    <div class="row-flex">
+      <label class="chk"><input type="radio" name="linkfmt" value="url" checked> 纯链接</label>
+      <label class="chk"><input type="radio" name="linkfmt" value="md"> Markdown</label>
+      <label class="chk"><input type="radio" name="linkfmt" value="html"> HTML</label>
+      <label class="chk"><input type="radio" name="linkfmt" value="bb"> BBCode</label>
+    </div>
+    <textarea id="links-out" readonly></textarea>
+    <div class="row-flex">
+      <button class="btn primary" id="btn-copy-links">复制全部</button>
+      <button class="btn ghost" id="btn-dl-links">下载 .txt</button>
+    </div>
+  </div>
+
   <div class="card-box" id="table-main" hidden>
     <h2>新旧链接对照表</h2>
     <div class="table-scroll"><table id="map-table"></table></div>
