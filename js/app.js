@@ -22,7 +22,7 @@
   }
   $('#tabs').addEventListener('click', function (e) {
     var t = e.target.closest('.tab');
-    if (t) switchTab(t.dataset.panel);
+    if (t) { switchTab(t.dataset.panel); scheduleSave(); }
   });
 
   /* ============ 进度条 ============ */
@@ -76,7 +76,7 @@
     updateSrcInfo();
   });
 
-  $('#src').addEventListener('input', updateSrcInfo);
+  $('#src').addEventListener('input', function () { updateSrcInfo(); scheduleSave(); });
   function updateSrcInfo() {
     var n = $('#src').value.length;
     $('#src-info').textContent = n ? ('当前 ' + n.toLocaleString() + ' 个字符') : '';
@@ -143,6 +143,8 @@
     var extra = [];
     if (r.unresolved) extra.push(r.unresolved + ' 处是相对路径，填上「基准地址」才能还原');
     U.toast('找到 ' + r.items.length + ' 张图（共出现 ' + r.total + ' 处）' + (extra.length ? '；' + extra.join('；') : ''));
+    $('#restore-bar').hidden = true;
+    saveNow();
     probeAll();
   });
 
@@ -231,6 +233,7 @@
       $('#img-stat').textContent = '检测中 ' + d + ' / ' + t + '…';
     }).then(function () {
       updateStat();
+      scheduleSave();
       var dead = state.items.filter(function (i) { return i.status === 'dead'; }).length;
       if (dead) U.toast('检测完成，有 ' + dead + ' 张已经失效了 TT');
     });
@@ -243,6 +246,7 @@
   $('#btn-sel-ok').addEventListener('click', function () { setSel(function (i) { return i.status === 'ok'; }); });
   function setSel(fn) {
     state.items.forEach(function (i) { i.sel = fn(i); });
+    scheduleSave();
     $$('.cell').forEach(function (c) {
       var it = byId(c.dataset.id);
       if (it) c.querySelector('.pick').checked = !!it.sel;
@@ -261,9 +265,21 @@
   /* ============ 取二进制（带缓存） ============ */
   function ensureBlob(it) {
     if (it.blob) return Promise.resolve({ ok: true, blob: it.blob });
-    return Img.fetchBlob(it.url).then(function (r) {
-      if (r.ok) { it.blob = r.blob; it.size = r.blob.size; }
-      return r;
+    // 先看本机缓存 —— 抓过一次就不用再抓，切走回来也还在
+    return Store.getBlob(it.url).then(function (cached) {
+      if (cached) {
+        it.blob = cached;
+        it.size = cached.size;
+        return { ok: true, blob: cached, via: '缓存' };
+      }
+      return Img.fetchBlob(it.url).then(function (r) {
+        if (r.ok) {
+          it.blob = r.blob;
+          it.size = r.blob.size;
+          Store.putBlob(it.url, r.blob);
+        }
+        return r;
+      });
     });
   }
 
@@ -400,6 +416,7 @@
         entries.push({ name: '说明.txt', data: READ_ME });
         U.saveBlob(Zip.build(entries), U.stem(state.sourceName) + '-图片.zip');
         doneToast(r, '打包好了');
+        refreshCacheInfo();
       });
     });
   });
@@ -623,6 +640,8 @@
         $('#btn-upload-retry').textContent = '重试失败的 ' + state.failed.length + ' 张';
         log('upload-log', '完成：成功 ' + okCount + ' 张，失败 ' + state.failed.length + ' 张');
         U.toast('上传完成：成功 ' + okCount + '，失败 ' + state.failed.length);
+        scheduleSave();
+        refreshCacheInfo();
         if (okCount) {
           buildCompareFromUpload();
           $('#btn-load-uploaded').disabled = false;
@@ -723,25 +742,33 @@
     var cmp = state.cmp;
     var box = $('#cmp-progress');
     var jobs = [];
+    /* 算指纹时顺手把取到的二进制也存进缓存 ——
+       不然这条路等于绕过了缓存，刷新之后又得重抓一遍 */
+    function take(target, r) {
+      target.hash = r.hash;
+      if (!target.w && r.w) { target.w = r.w; target.h = r.h; }
+      if (r.blob) {
+        if (!target.blob) target.blob = r.blob;
+        Store.putBlob(target.url, r.blob);
+      }
+    }
+    function hashOf(target) {
+      if (target.blob) return Img.hashFromBlob(target.blob).then(function (r) { take(target, r); });
+      return Store.getBlob(target.url).then(function (cached) {
+        if (cached) {
+          target.blob = cached;
+          return Img.hashFromBlob(cached).then(function (r) { take(target, r); });
+        }
+        return Img.hashFromUrl(target.url).then(function (r) { take(target, r); });
+      });
+    }
     cmp.olds.forEach(function (o) {
       if (o.hash || o.status !== 'ok') return;
-      jobs.push(function () {
-        var p = o.blob ? Img.hashFromBlob(o.blob) : Img.hashFromUrl(o.url);
-        return p.then(function (r) {
-          o.hash = r.hash;
-          if (!o.w && r.w) { o.w = r.w; o.h = r.h; }
-          if (r.blob && !o.blob) o.blob = r.blob;
-        });
-      });
+      jobs.push(function () { return hashOf(o); });
     });
     cmp.news.forEach(function (n) {
       if (n.hash || n.status !== 'ok') return;
-      jobs.push(function () {
-        return Img.hashFromUrl(n.url).then(function (r) {
-          n.hash = r.hash;
-          if (!n.w && r.w) { n.w = r.w; n.h = r.h; }
-        });
-      });
+      jobs.push(function () { return hashOf(n); });
     });
     return U.pool(jobs, 4, function (j) { return j(); },
       function (d, t) { progress(box, d, t, '算指纹'); })
@@ -762,6 +789,7 @@
     $('#pair-stat').textContent = '共 ' + cmp.rows.length + ' 行 · 已配好 ' + done +
       ' · 待分配 ' + poolIdx().length;
     if (goTab) switchTab('panel-compare');
+    scheduleSave();
   }
 
   function poolIdx() {
@@ -1064,6 +1092,146 @@
     if (e.key === 'Escape') $('#lightbox').hidden = true;
   });
 
+  /* ============ 进度缓存 ============
+     手机浏览器会把后台标签页直接回收，回来等于重新打开。
+     所以每有变动就把进度写进本机，下次打开自动接上。 */
+
+  var SAVE_KEY = 'session', SAVE_V = 1;
+  var saveTimer = null, restoring = false, wiping = false;
+
+  function snapshot() {
+    return {
+      v: SAVE_V,
+      time: Date.now(),
+      source: state.source,
+      srcText: $('#src').value,
+      sourceName: state.sourceName,
+      baseUrl: $('#base-url').value,
+      newUrlsText: $('#new-urls').value,
+      panel: (document.querySelector('.panel.active') || {}).id || 'panel-input',
+      items: state.items.map(function (i) {
+        return {
+          id: i.id, url: i.url, raw: i.raw, kind: i.kind, resolved: i.resolved, isData: i.isData,
+          occurrences: i.occurrences, index: i.index, filename: i.filename,
+          status: i.status, w: i.w, h: i.h, newUrl: i.newUrl, sel: i.sel,
+          hash: i.hash, size: i.size, deadReason: i.deadReason
+        };
+      }),
+      cmp: state.cmp ? {
+        oldIds: state.cmp.olds.map(function (o) { return o.id; }),
+        news: state.cmp.news.map(function (n) {
+          return { url: n.url, filename: n.filename, w: n.w, h: n.h, hash: n.hash, status: n.status };
+        }),
+        rows: state.cmp.rows
+      } : null
+    };
+  }
+
+  function saveNow() {
+    // wiping：用户正在清空，别让 pagehide 上的这次保存把刚删掉的又写回去
+    if (restoring || wiping) return Promise.resolve();
+    if (!state.items.length && !$('#src').value.trim()) return Store.del(SAVE_KEY);
+    return Store.set(SAVE_KEY, snapshot());
+  }
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 800);
+  }
+
+  function restoreSession() {
+    return Store.get(SAVE_KEY).then(function (d) {
+      if (!d || d.v !== SAVE_V) return;
+      restoring = true;
+      try {
+        if (d.srcText) { $('#src').value = d.srcText; }
+        if (d.baseUrl) $('#base-url').value = d.baseUrl;
+        if (d.newUrlsText) $('#new-urls').value = d.newUrlsText;
+        updateSrcInfo();
+
+        if (d.items && d.items.length) {
+          state.source = d.source || '';
+          state.sourceName = d.sourceName || 'code.html';
+          state.items = d.items.map(function (i) { i.blob = null; return i; });
+          $('#tab-count').textContent = state.items.length;
+          $('#images-empty').hidden = true;
+          $('#images-main').hidden = false;
+          renderGrid();
+          $('#btn-load-uploaded').disabled = !state.items.some(function (i) { return i.newUrl; });
+
+          if (d.cmp && d.cmp.rows) {
+            var byId = {};
+            state.items.forEach(function (i) { byId[i.id] = i; });
+            var olds = d.cmp.oldIds.map(function (id) { return byId[id]; });
+            // 有对不上的就整块跳过，宁可让用户重新匹配，也不要错位
+            if (olds.every(Boolean) && olds.length === d.cmp.rows.length) {
+              state.cmp = { olds: olds, news: d.cmp.news, rows: d.cmp.rows };
+              renderCompare(false);
+            }
+          }
+          showRestoreBar(d);
+          if (d.panel && document.getElementById(d.panel)) switchTab(d.panel);
+        }
+      } finally {
+        restoring = false;
+      }
+    })['catch'](function () { restoring = false; });
+  }
+
+  function ago(t) {
+    var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return '刚刚';
+    if (s < 3600) return Math.round(s / 60) + ' 分钟前';
+    if (s < 86400) return Math.round(s / 3600) + ' 小时前';
+    return Math.round(s / 86400) + ' 天前';
+  }
+
+  function showRestoreBar(d) {
+    var done = (d.cmp && d.cmp.rows) ? d.cmp.rows.filter(function (r) { return r.ni >= 0 || r.manual; }).length : 0;
+    $('#restore-text').textContent =
+      '接着上次继续：' + d.items.length + ' 张图' +
+      (done ? '、已配好 ' + done + ' 对' : '') + '（' + ago(d.time) + '存的）';
+    $('#restore-bar').hidden = false;
+  }
+
+  $('#btn-restart').addEventListener('click', function () {
+    wiping = true;
+    clearTimeout(saveTimer);
+    Store.del(SAVE_KEY).then(function () { location.reload(); });
+  });
+
+  $('#btn-clear-cache').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    wiping = true;
+    clearTimeout(saveTimer);
+    Store.clearAll().then(function () {
+      U.toast('缓存清完了，页面马上刷新');
+      setTimeout(function () { location.reload(); }, 700);
+    });
+  });
+
+  function refreshCacheInfo() {
+    Promise.all([Store.blobCount(), Store.usage()]).then(function (r) {
+      var n = r[0], u = r[1];
+      var parts = [];
+      if (n) parts.push('已缓存 ' + n + ' 张图片');
+      if (u && u.used) parts.push('本机占用约 ' + U.fmtBytes(u.used) +
+        (u.quota ? '，这个浏览器大约能放 ' + U.fmtBytes(u.quota) : ''));
+      var txt = parts.join('，');
+      $('#cache-info').textContent = n ? txt : '';
+      $('#cache-info2').textContent = txt || '目前还没存什么';
+    });
+  }
+
+  /* 页面被切走 / 关掉之前赶紧存一次 */
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') saveNow();
+  });
+  window.addEventListener('pagehide', saveNow);
+
+  $('#base-url').addEventListener('change', scheduleSave);
+  $('#new-urls').addEventListener('input', scheduleSave);
+
   /* ============ 日间 / 夜间 ============ */
   var THEMES = [
     { v: '', label: '跟随系统' },
@@ -1091,6 +1259,7 @@
   /* ============ 启动 ============ */
   applyTheme(U.store.get('theme', ''));
   initSaveBar();
+  restoreSession().then(refreshCacheInfo);
   loadRelay();
   initHostSelect();
   updateSrcInfo();

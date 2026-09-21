@@ -369,3 +369,9 @@ th { background: var(--surface-2); white-space: nowrap; }
 .save-diff[open] > summary::before { content: "▾ "; }
 .save-diff .hint { margin-top: 8px; }
 #save-bar { row-gap: 8px; }
+
+/* 恢复进度的提示条 */
+.restore-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; }
+/* 类选择器会盖掉浏览器给 [hidden] 的 display:none，得自己补回来 */
+.restore-bar[hidden] { display: none; }
+.restore-bar #restore-text { flex: 1 1 auto; }

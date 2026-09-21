@@ -37,6 +37,11 @@
 
 <main class="wrap">
 
+<div class="hint tip restore-bar" id="restore-bar" hidden>
+  <span id="restore-text"></span>
+  <button class="btn tiny" id="btn-restart">清掉，重新开始</button>
+</div>
+
 <!-- ========== 1. 输入 ========== -->
 <section id="panel-input" class="panel active">
   <div class="card-box">
@@ -52,6 +57,7 @@
       <button class="btn primary" id="btn-extract">提取图片</button>
     </div>
     <p class="hint" id="src-info"></p>
+    <p class="hint" id="cache-info"></p>
   </div>
 
   <div class="card-box">
@@ -80,6 +86,19 @@
       <span id="relay-status" class="hint"></span>
     </div>
   </details>
+
+  <div class="card-box">
+    <h2>本机缓存</h2>
+    <p class="hint">
+      提取结果、配好的对照、已经抓回来的图片，都会自动存在这台设备的浏览器里。
+      手机切走再回来、或者不小心关掉页面，重新打开会接着上次的继续，抓过的图也不用再抓一遍。
+      这些数据只在本机，不会上传到任何地方。
+    </p>
+    <div class="row-flex">
+      <button class="btn ghost" id="btn-clear-cache">清除全部缓存</button>
+      <span class="hint" id="cache-info2"></span>
+    </div>
+  </div>
 </section>
 
 <!-- ========== 2. 图片 ========== -->
@@ -228,6 +247,7 @@
 <script src="js/imaging.js"></script>
 <script src="js/hosts.js"></script>
 <script src="js/match.js"></script>
+<script src="js/store.js"></script>
 <script src="js/setup.js"></script>
 <script src="js/app.js"></script>
 </body>
