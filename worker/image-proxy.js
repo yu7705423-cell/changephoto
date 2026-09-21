@@ -11,7 +11,7 @@
  */
 
 const ALLOW_FORWARD = [
-  'sm.ms', 'api.imgbb.com', 'api.github.com', 'smms.app'
+  's.ee', 'sm.ms', 'api.imgbb.com', 'api.github.com', 'smms.app'
 ];
 
 const MAX_BYTES = 40 * 1024 * 1024;   // 单张 40MB 上限

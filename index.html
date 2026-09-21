@@ -7,12 +7,23 @@
 <meta name="description" content="从 HTML / CSS 代码里提取所有图片链接，打包下载、批量转存图床，并用前后对照表核对每一张图。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>">
 <link rel="stylesheet" href="css/style.css">
+<script>
+  /* 在样式生效前就把主题定下来，避免夜间模式下闪一下白屏 */
+  try {
+    var _t = localStorage.getItem('cp:theme');
+    if (_t) { _t = JSON.parse(_t); if (_t) document.documentElement.setAttribute('data-theme', _t); }
+  } catch (e) {}
+</script>
 </head>
 <body>
 <header class="topbar">
   <div class="wrap">
-    <h1>图床搬家工具</h1>
-    <p class="sub">提取代码里的图片 → 打包下载 → 转存新图床 → 前后对照 → 导出新代码</p>
+    <div>
+      <h1>图床搬家工具</h1>
+      <p class="sub">提取代码里的图片 → 打包下载 → 转存新图床 → 前后对照 → 导出新代码</p>
+    </div>
+    <span class="grow"></span>
+    <button id="theme-toggle" title="切换日间 / 夜间">跟随系统</button>
   </div>
 </header>
 
@@ -21,6 +32,7 @@
   <button class="tab" data-panel="panel-images"><i>2</i>图片<em id="tab-count"></em></button>
   <button class="tab" data-panel="panel-compare"><i>3</i>对照</button>
   <button class="tab" data-panel="panel-export"><i>4</i>导出</button>
+  <button class="tab" data-panel="panel-setup"><i>+</i>搭建图床</button>
 </nav>
 
 <main class="wrap">
@@ -98,6 +110,8 @@
 
   <div class="card-box" id="upload-box" hidden>
     <h2>转存到图床</h2>
+    <p class="hint">还没有图床？<a href="#" id="go-setup">去「搭建图床」一步步做一个 →</a>
+      搭好之后配置会自动填到这里。</p>
     <div class="field">
       <label for="host">选择图床</label>
       <select id="host"></select>
@@ -175,6 +189,19 @@
   </div>
 </section>
 
+<!-- ========== 搭建图床 ========== -->
+<section id="panel-setup" class="panel">
+  <div class="card-box">
+    <h2>选一种方式搭建你的图床</h2>
+    <p class="hint">每一步要做什么、去哪个页面点什么，下面都写清楚了，需要复制的内容有复制按钮。
+      搭好并测试通过之后，配置会自动填进「图片 → 转存到图床」，直接就能开始搬。</p>
+    <div class="providers" id="providers"></div>
+  </div>
+  <div class="card-box" id="wizard-box" hidden>
+    <div class="wizard" id="wizard"></div>
+  </div>
+</section>
+
 </main>
 
 <footer class="wrap foot">
@@ -190,6 +217,7 @@
 <script src="js/imaging.js"></script>
 <script src="js/hosts.js"></script>
 <script src="js/match.js"></script>
+<script src="js/setup.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

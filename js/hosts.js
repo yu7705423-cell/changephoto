@@ -48,6 +48,30 @@
     return new Error('HTTP ' + res.status + '：' + msg);
   }
 
+  /* 把用户名 + 仓库名拼成 owner/repo，顺手容错：
+     整串 URL、把 user/repo 粘进任一个框、多余的斜杠和 .git 后缀都能认 */
+  function ghRepo(cfg) {
+    function clean(v) {
+      return String(v || '').trim()
+        .replace(/^https?:\/\/github\.com\//i, '')
+        .replace(/\.git$/i, '')
+        .replace(/^\/+|\/+$/g, '');
+    }
+    var owner = clean(cfg.owner), name = clean(cfg.repo);
+    if (owner.indexOf('/') > 0) {
+      var a = owner.split('/');
+      owner = a[0];
+      if (!name) name = a[1];
+    }
+    if (name.indexOf('/') > 0) {
+      var b = name.split('/');
+      if (!owner) owner = b[0];
+      name = b[b.length - 1];
+    }
+    if (!owner || !name) throw new Error('GitHub 用户名和仓库名都要填');
+    return owner + '/' + name;
+  }
+
   var HOSTS = {
 
     /* ---------------- GitHub 仓库 + jsDelivr CDN ---------------- */
@@ -56,8 +80,9 @@
       note: '把图片提交到你的公开仓库，再用 jsDelivr 免费加速。仓库必须是 public，jsDelivr 才读得到。' +
             ' Token 在 GitHub → Settings → Developer settings → Personal access tokens 生成，勾 repo（细粒度 token 给 Contents 读写权限即可）。',
       fields: [
+        { key: 'owner', label: 'GitHub 用户名', type: 'text', required: true, placeholder: '例如 octocat' },
+        { key: 'repo', label: '仓库名', type: 'text', required: true, placeholder: '例如 image-host' },
         { key: 'token', label: 'GitHub Token', type: 'password', required: true, placeholder: 'ghp_… 或 github_pat_…' },
-        { key: 'repo', label: '仓库', type: 'text', required: true, placeholder: '用户名/仓库名' },
         { key: 'branch', label: '分支', type: 'text', value: 'main', placeholder: 'main' },
         { key: 'dir', label: '存放目录', type: 'text', value: 'images', placeholder: 'images 或 images/2026' },
         { key: 'linkStyle', label: '生成链接', type: 'select', value: 'jsdelivr',
@@ -68,8 +93,7 @@
           ] }
       ],
       upload: function (blob, filename, cfg) {
-        var repo = String(cfg.repo || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/^\/|\/$/g, '');
-        if (repo.split('/').length !== 2) throw new Error('仓库要写成「用户名/仓库名」');
+        var repo = ghRepo(cfg);
         var branch = (cfg.branch || 'main').trim();
         var dir = String(cfg.dir || '').trim().replace(/^\/|\/$/g, '');
 
@@ -153,20 +177,26 @@
 
     /* ---------------- SM.MS ---------------- */
     smms: {
-      name: 'SM.MS',
-      note: 'Token 在 sm.ms → 登录后 User → API Token 生成。单张最大 5MB，每分钟限 20 张，' +
-            '所以这里会自动放慢速度。如果浏览器报跨域错误，勾上「通过 Worker 中转」。',
+      name: 'S.EE（原 SM.MS）',
+      note: 'SM.MS 已整体迁到 s.ee，接口仍兼容原来的 v2 API。Token 在登录后的控制台 API Token 页面拿。' +
+            '单张最大 5MB、每分钟限 20 张，所以这里会自动放慢速度。浏览器报跨域错误就勾「通过 Worker 中转」。',
       fields: [
-        { key: 'token', label: 'API Token', type: 'password', required: true, placeholder: 'sm.ms 的 API Token' },
+        { key: 'token', label: 'API Token', type: 'password', required: true, placeholder: 's.ee 的 API Token' },
+        { key: 'base', label: '接口域名', type: 'select', value: 'https://s.ee',
+          options: [
+            { value: 'https://s.ee', label: 's.ee（新域名，推荐）' },
+            { value: 'https://sm.ms', label: 'sm.ms（旧域名）' }
+          ] },
         { key: 'viaRelay', label: '通过 Worker 中转上传（跨域失败时勾这个）', type: 'checkbox' }
       ],
       throttle: 3200,
       upload: function (blob, filename, cfg) {
-        if (blob.size > 5 * 1024 * 1024) throw new Error('SM.MS 单张上限 5MB，这张 ' + U.fmtBytes(blob.size));
+        if (blob.size > 5 * 1024 * 1024) throw new Error('单张上限 5MB，这张 ' + U.fmtBytes(blob.size));
+        var base = (cfg.base || 'https://s.ee').replace(/\/+$/, '');
         var fd = new FormData();
         fd.append('smfile', blob, filename);
         fd.append('format', 'json');
-        return doPost('https://sm.ms/api/v2/upload', { method: 'POST', body: fd }, cfg,
+        return doPost(base + '/api/v2/upload', { method: 'POST', body: fd }, cfg,
                       String(cfg.token).trim())
           .then(asJson).then(function (res) {
             var j = res.json;

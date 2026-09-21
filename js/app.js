@@ -905,7 +905,32 @@
     if (e.key === 'Escape') $('#lightbox').hidden = true;
   });
 
+  /* ============ 日间 / 夜间 ============ */
+  var THEMES = [
+    { v: '', label: '跟随系统' },
+    { v: 'light', label: '日间' },
+    { v: 'dark', label: '夜间' }
+  ];
+  function applyTheme(v) {
+    if (v) document.documentElement.setAttribute('data-theme', v);
+    else document.documentElement.removeAttribute('data-theme');
+    var cur = THEMES.filter(function (t) { return t.v === v; })[0] || THEMES[0];
+    $('#theme-toggle').textContent = cur.label;
+    U.store.set('theme', v);
+  }
+  $('#theme-toggle').addEventListener('click', function () {
+    var now = U.store.get('theme', '');
+    var i = THEMES.map(function (t) { return t.v; }).indexOf(now);
+    applyTheme(THEMES[(i + 1) % THEMES.length].v);
+  });
+
+  $('#go-setup').addEventListener('click', function (e) {
+    e.preventDefault();
+    document.querySelector('.tab[data-panel="panel-setup"]').click();
+  });
+
   /* ============ 启动 ============ */
+  applyTheme(U.store.get('theme', ''));
   loadRelay();
   initHostSelect();
   updateSrcInfo();

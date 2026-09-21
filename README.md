@@ -3,8 +3,14 @@
 贴一段 HTML / CSS 代码进去，它会把里面所有图片链接挖出来、缩略图排开，
 让你一键打包下载，或者一键转存到新图床，最后再给你一份换好链接的代码和新旧对照表。
 
+还没有图床的话，它也能一步步带你搭一个。
+
 **纯前端，打开网页就能用。** 图片和图床 token 都只在你自己的浏览器里，
 不经过任何第三方服务器（配了中转的话，只经过你自己部署的 Cloudflare Worker）。
+
+界面是纯黑白的，跟随系统深色模式，也可以在右上角手动切日间 / 夜间。
+状态全靠符号和描边区分（✓ 能加载、✕ 已失效、实心＝可信度高、虚线＝低），不靠颜色，
+所以色盲和黑白打印都读得出来。
 
 ## 能做什么
 
@@ -13,11 +19,29 @@
 | **提取** | `img` 的 src / srcset / data-src 等懒加载属性、CSS 的 `url()`、行内 style、SVG `<image>`、`og:image`、Markdown 图片、正文里的裸链接、`data:` 内嵌图，自动去重合并 |
 | **展示** | 缩略图网格，每张标出「能加载 + 尺寸」还是「已失效」 |
 | **下载** | 勾选后打包成 ZIP，文件按 `001-xxx.png` 顺序编号，附带 `清单.csv` |
-| **转存** | GitHub + jsDelivr、ImgBB、SM.MS、Cloudflare R2，以及任意自定义接口（兰空 / Chevereto 等）。有进度条，失败的单独列出来可以重试 |
+| **转存** | GitHub + jsDelivr、ImgBB、S.EE（原 SM.MS）、Cloudflare R2，以及任意自定义接口（兰空 / Chevereto 等）。有进度条，失败的单独列出来可以重试 |
 | **对照** | 前后两栏并排显示，中间写清「依据」和「可信度」，可以点选交换、上下移动、单独粘链接覆盖 |
 | **导出** | 自动把原代码里的旧链接换成新链接，另附新旧对照表（CSV / Markdown / JSON） |
+| **搭建图床** | 还没有图床的话，从注册账号到拿 token 一步步带着做，每步都有直达链接。测试连接通过后配置自动填进转存页 |
 
 失效的图（比如对象存储已经 `NoSuchKey` 的）会明确标成「已失效」，不会假装成功。
+
+## 还没有图床？
+
+「搭建图床」这一页会带你把图床从零搭起来，四种方式各有取舍：
+
+| 方式 | 要花什么 | 适合 |
+|---|---|---|
+| **GitHub + jsDelivr** | 免费，不用绑卡 | 想长期存、不怕图被人看到。仓库是你自己的，服务方跑路了图还在。缺点是 jsDelivr 在国内常被 DNS 污染 |
+| **ImgBB** | 免费，注册就用 | 只想赶紧搬完不折腾。缺点是没有标准删除接口 |
+| **S.EE（原 SM.MS）** | 新用户要买套餐 | 老用户续用。注意 SM.MS 已整体迁到 s.ee，密码没一起迁移，要重设 |
+| **Cloudflare R2** | 要绑卡（免费额度内不扣费） | 最耐用。10GB 免费空间、出口流量全免费 |
+
+每一步都写清楚了去哪个页面点什么，需要复制的内容有复制按钮，填完点「测试连接」就知道配置对不对，
+通过之后配置会自动填进「转存到图床」。
+
+选 R2 的话要部署一个 Worker —— 就是下面说的那个中转 Worker，**一份代码同时干两件事**：
+给 R2 收图，以及中转抓取旧图床里跨域/防盗链的图。不用部署两个。
 
 ## 怎么用
 
@@ -76,15 +100,15 @@ Worker 在服务器端取图，不带网页来源，这两个问题都能绕开�
 代码和三分钟部署步骤在 [`worker/README.md`](worker/README.md)，免费额度足够用。
 
 用 Cloudflare R2 存图的话必须配它（R2 不支持浏览器直传）。
-SM.MS 和自定义接口如果报跨域错误，也可以勾上「通过 Worker 中转上传」。
+S.EE 和自定义接口如果报跨域错误，也可以勾上「通过 Worker 中转上传」。
 
 ## 各图床要填什么
 
 | 图床 | 需要的东西 | 在哪拿 |
 |---|---|---|
-| **GitHub + jsDelivr** | Token、`用户名/仓库名` | GitHub → Settings → Developer settings → Personal access tokens，勾 `repo`（细粒度 token 给 Contents 读写即可）。仓库必须是 public，jsDelivr 才读得到 |
+| **GitHub + jsDelivr** | 用户名、仓库名、Token | GitHub → Settings → Developer settings → Personal access tokens，勾 `repo`（细粒度 token 给 Contents 读写即可）。仓库必须是 public，jsDelivr 才读得到 |
 | **ImgBB** | API Key | 登录 imgbb.com 后打开 api.imgbb.com 点 Get API key |
-| **SM.MS** | API Token | 登录 sm.ms → User → API Token。单张 5MB、每分钟 20 张，工具会自动放慢速度 |
+| **S.EE（原 SM.MS）** | API Token | 登录 s.ee → 控制台 API Token 页面。单张 5MB、每分钟 20 张，工具会自动放慢速度。接口域名可以在 s.ee / sm.ms 之间切 |
 | **Cloudflare R2** | 部署好的 Worker | 见 `worker/README.md` |
 | **自定义接口** | 接口地址、字段名、Authorization、链接字段路径 | 按你的图床文档填。兰空图床 V2 举例：接口 `https://域名/api/v1/upload`，字段名 `file`，链接字段 `data.links.url` |
 
@@ -102,6 +126,7 @@ js/zip.js           ZIP 打包（自己实现，不引任何库）
 js/imaging.js       图片探活 / 取二进制 / dHash 指纹
 js/hosts.js         各图床适配器
 js/match.js         新旧图自动配对与可信度评分
+js/setup.js         搭建图床向导（各家的步骤、直达链接、连接测试）
 js/app.js           主流程
 worker/             Cloudflare Worker 中转（可选）
 ```
