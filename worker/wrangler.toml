@@ -1,0 +1,15 @@
+name = "image-mover-proxy"
+main = "image-proxy.js"
+compatibility_date = "2024-11-01"
+
+# 口令别写在这里，用 `wrangler secret put ACCESS_TOKEN` 设置。
+
+# ---- 只有要用 Cloudflare R2 存图时才需要下面两段，取消注释并改成你自己的 ----
+
+# [[r2_buckets]]
+# binding = "BUCKET"              # 变量名必须叫 BUCKET，前端按这个名字找
+# bucket_name = "my-images"       # 改成你建的桶名
+
+# [vars]
+# PUBLIC_BASE = "https://img.yourdomain.com"   # R2 桶的公开访问地址，末尾不要斜杠
+# ALLOW_HOSTS = ""                             # 额外允许 /forward 转发的域名，逗号分隔
